@@ -5,7 +5,9 @@ import path from 'node:path';
 import { config, providerStatus, ROOT } from './config.js';
 import * as store from './store.js';
 import * as places from './providers/places.js';
-import { runGridScan } from './modules/maprank.js';
+import { runGridScan, planGrid } from './modules/maprank.js';
+import { suggestKeywords } from './modules/keywords.js';
+import { widgetHtml } from './modules/widget.js';
 import { auditProfile } from './modules/gbp.js';
 import { reviewSnapshot, draftReplies } from './modules/reviews.js';
 import { runAudit } from './modules/audit.js';
@@ -24,7 +26,7 @@ import { reportBundle, newShare, bundleForShare, emailReport } from './modules/r
 import { ENGINES } from './providers/engines.js';
 
 const PUBLIC = path.join(ROOT, 'public');
-const MIME = { '.webmanifest': 'application/manifest+json', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon' };
+const MIME = { '.webmanifest': 'application/manifest+json', '.mjs': 'text/javascript; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon' };
 
 const routes = [];
 const route = (method, pattern, handler) => routes.push({ method, re: new RegExp('^' + pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$'), handler });
@@ -39,7 +41,10 @@ route('GET', '/api/places/search', async (_, q) => {
   return { results: await places.findBusiness(q.get('q') || '') };
 });
 
-route('GET', '/api/projects', () => store.listProjects().map(p => ({ ...p, scorecard: scorecard(p) })));
+route('GET', '/api/projects', () => store.listProjects().map(p => {
+  const g = store.latestRun(p.id, 'grid'), rv = store.latestRun(p.id, 'reviews');
+  return { ...p, scorecard: scorecard(p), grid: g && { keyword: g.data.config.keyword, metrics: g.data.metrics, delta: g.data.delta, at: g.createdAt }, reviewsSummary: rv && { rating: rv.data.rating, total: rv.data.total } };
+}));
 route('POST', '/api/projects', (_, __, body) => {
   if (!body.name) throw Object.assign(new Error('name is required'), { status: 400 });
   const p = store.createProject(clean(body));
@@ -55,6 +60,13 @@ route('GET', '/api/runs/:rid', (p) => { const r = store.getRun(p.rid); if (!r) t
 route('GET', '/api/projects/:pid/latest/:type', (p, q) => slim(store.latestRun(project(p).id, p.type, q.get('keyword') ? r => r.keyword === q.get('keyword').toLowerCase() : undefined)));
 
 route('POST', '/api/projects/:pid/grid', (p, _, b) => runGridScan(project(p), b));
+route('POST', '/api/projects/:pid/grid/preview', (p, _, b) => planGrid(project(p), b));
+// Compact history for the mini-heatmap strip and the then-vs-now picker.
+route('GET', '/api/projects/:pid/grid/history', (p, q) => store.listRuns(project(p).id, 'grid', 40)
+  .filter(r => !q.get('keyword') || r.keyword === q.get('keyword').toLowerCase())
+  .map(r => ({ id: r.id, createdAt: r.createdAt, keyword: r.keyword, config: r.data.config, metrics: r.data.metrics, points: r.data.points.map(x => ({ row: x.row, col: x.col, lat: x.lat, lng: x.lng, rank: x.rank })) })));
+route('POST', '/api/suggest-keywords', async (_, __, b) => ({ keywords: await suggestKeywords(b.category, b.city, b.name) }));
+route('POST', '/api/projects/:pid/widget', (p) => { const pr = project(p); const token = pr.widgetToken || crypto.randomBytes(9).toString('base64url'); store.updateProject(pr.id, { widgetToken: token }); return { token }; });
 route('POST', '/api/projects/:pid/gbp', (p) => auditProfile(project(p)));
 route('POST', '/api/projects/:pid/reviews', (p) => reviewSnapshot(project(p)));
 route('POST', '/api/projects/:pid/reviews/replies', (p, _, b) => draftReplies(project(p), b.reviews || [], b.tone));
@@ -107,7 +119,7 @@ route('GET', '/api/projects/:pid/plan', async (p, q) => {
 
 function clean(b) {
   const out = {};
-  for (const k of ['name', 'domain', 'address', 'city', 'state', 'phone', 'category', 'placeId', 'about', 'schedule', 'reviewUrl', 'reviewSms', 'reviewEmail', 'reviewEmailSubject', 'gscSite', 'ga4Property', 'alertEmail', 'reportSchedule']) if (b[k] !== undefined) out[k] = typeof b[k] === 'string' ? b[k].trim() : b[k];
+  for (const k of ['name', 'domain', 'address', 'city', 'state', 'phone', 'category', 'placeId', 'about', 'schedule', 'reviewUrl', 'reviewSms', 'reviewEmail', 'reviewEmailSubject', 'gscSite', 'ga4Property', 'alertEmail', 'reportSchedule', 'group']) if (b[k] !== undefined) out[k] = typeof b[k] === 'string' ? b[k].trim() : b[k];
   for (const k of ['lat', 'lng']) if (b[k] !== undefined && b[k] !== '') out[k] = Number(b[k]);
   if (b.reviewFollowupDays !== undefined && b.reviewFollowupDays !== '') out.reviewFollowupDays = Math.max(0, Math.min(30, Number(b.reviewFollowupDays) || 0));
   for (const k of ['keywords', 'competitors', 'aiPrompts', 'gridKeywords', 'devices', 'trackLocations', 'reportRecipients']) if (b[k] !== undefined) out[k] = (Array.isArray(b[k]) ? b[k] : String(b[k]).split('\n')).map(s => String(s).trim()).filter(Boolean);
@@ -124,7 +136,7 @@ function baseUrl(req) {
 // Optional password protection for the whole app (except customer review links and shared reports).
 function authorized(req, pathname) {
   if (!config.appPassword) return true;
-  if (pathname.startsWith('/r/') || pathname.startsWith('/api/share/') || pathname === '/api/health' || pathname === '/manifest.webmanifest' || pathname.startsWith('/icons/')) return true;
+  if (pathname.startsWith('/r/') || pathname.startsWith('/widget/') || pathname.startsWith('/api/share/') || pathname === '/api/health' || pathname === '/manifest.webmanifest' || pathname.startsWith('/icons/')) return true;
   const h = req.headers.authorization || '';
   const [, b64] = h.split(' ');
   const pass = b64 ? Buffer.from(b64, 'base64').toString().split(':').slice(1).join(':') : '';
@@ -170,6 +182,13 @@ export function createServer() {
     if (!authorized(req, url.pathname)) {
       res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="RankPilot"', 'Content-Type': 'text/plain' });
       return res.end('Password required');
+    }
+    const wm = url.pathname.match(/^\/widget\/([\w-]+)$/);
+    if (wm) {
+      const pr = store.listProjects().find(x => x.widgetToken === wm[1]);
+      if (!pr) return send(res, 404, 'Widget not found', 'text/plain');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=900' });
+      return res.end(widgetHtml(pr, url.searchParams));
     }
     // Tracked review-request link -> Google review form
     const rm = url.pathname.match(/^\/r\/([\w-]+)$/);

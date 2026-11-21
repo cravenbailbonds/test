@@ -32,6 +32,8 @@ export function gridMetrics(ranks, notFound = 21) {
     top3Pct: round((top3 / n) * 100, 1),
     top10Pct: round((top10 / n) * 100, 1),
     visibility: round(vis * 100, 1),
+    // Semrush-style distribution: Good 1-3, Average 4-10, Poor 11-20, Out (not in top 20).
+    distribution: { good: top3, average: top10 - top3, poor: found.filter(r => r > 10).length, out: ranks.length - found.length },
   };
 }
 
@@ -41,7 +43,7 @@ export function competitorLeaderboard(points, isTarget) {
   for (const p of points) {
     (p.results || []).forEach((r, i) => {
       const key = r.placeId || r.name;
-      if (!map.has(key)) map.set(key, { key, name: r.name, placeId: r.placeId, domain: r.domain, rating: r.rating, reviews: r.reviews, category: r.category, address: r.address, ranks: [], isTarget: isTarget(r) });
+      if (!map.has(key)) map.set(key, { key, name: r.name, placeId: r.placeId, domain: r.domain, rating: r.rating, reviews: r.reviews, category: r.category, address: r.address, lat: r.lat ?? null, lng: r.lng ?? null, ranks: [], isTarget: isTarget(r) });
       map.get(key).ranks.push(i + 1);
     });
   }
@@ -49,7 +51,8 @@ export function competitorLeaderboard(points, isTarget) {
   return [...map.values()].map(c => {
     const full = c.ranks.concat(Array(Math.max(0, total - c.ranks.length)).fill(null));
     const m = gridMetrics(full);
-    return { ...c, ranks: undefined, appearances: c.ranks.length, ...m };
+    const distribution = { good: c.ranks.filter(r => r <= 3).length, average: c.ranks.filter(r => r > 3 && r <= 10).length, poor: c.ranks.filter(r => r > 10).length };
+    return { ...c, ranks: undefined, appearances: c.ranks.length, distribution, ...m };
   }).sort((a, b) => b.visibility - a.visibility || a.atrp - b.atrp);
 }
 

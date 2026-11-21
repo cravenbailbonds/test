@@ -14,7 +14,8 @@ async function api(path, opts = {}) {
 function toast(msg, ms = 3200) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), ms); }
 async function busy(btn, fn) {
   const label = btn.innerHTML; btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Working…`;
-  try { return await fn(); } catch (e) { toast('⚠ ' + e.message, 6000); throw e; } finally { btn.disabled = false; btn.innerHTML = label; }
+  // Errors are shown to the user, not rethrown (a rethrow from a click handler is an unhandled rejection).
+  try { return await fn(); } catch (e) { toast('⚠ ' + e.message, 6000); return undefined; } finally { btn.disabled = false; btn.innerHTML = label; }
 }
 const srcPill = s => !s ? '' : s === 'demo' ? '<span class="pill demo" title="Simulated data - add the provider API key in .env for live data">DEMO DATA</span>' : `<span class="pill live">LIVE · ${esc(s.replace(/_/g, ' '))}</span>`;
 const ring = (v, label) => `<div class="score-ring" style="--v:${v ?? 0};--c:${v == null ? 'var(--border)' : v >= 70 ? 'var(--good)' : v >= 45 ? 'var(--warning)' : 'var(--critical)'}"><div>${v ?? '–'}</div></div>${label ? `<div class="muted small">${label}</div>` : ''}`;
@@ -22,7 +23,7 @@ const ring = (v, label) => `<div class="score-ring" style="--v:${v ?? 0};--c:${v
 // ---------------------------------------------------------------- state & nav
 const S = { status: null, projects: [], pid: store.get('pid', null), get project() { return this.projects.find(p => p.id === this.pid); } };
 const NAV = [
-  ['Overview', [['overview', '⌂', 'Dashboard'], ['plan', '✓', 'Action Plan']]],
+  ['Overview', [['locations', '▦', 'All Businesses'], ['overview', '⌂', 'Dashboard'], ['plan', '✓', 'Action Plan']]],
   ['Local', [['maps', '◎', 'Map Rank Grid'], ['gbp', '★', 'Business Profile'], ['reviews', '✎', 'Reviews'], ['requests', '✉', 'Review Requests'], ['citations', '≡', 'Listings']]],
   ['Organic', [['audit', '⚙', 'Site Audit'], ['keywords', '⌕', 'Keyword Research'], ['research', '⚔', 'Competitor Research'], ['organic', '↗', 'Rank Tracking'], ['traffic', '▤', 'Traffic Insights'], ['backlinks', '⛓', 'Backlinks']]],
   ['AI Search', [['ai', '✦', 'AI Visibility'], ['content', '✍', 'Content Studio']]],
@@ -42,10 +43,11 @@ function renderNav(active) {
 async function refreshProjects() { S.projects = await api('/projects'); if (!S.project && S.projects[0]) S.pid = S.projects[0].id; store.set('pid', S.pid); }
 
 const views = {};
-let currentMap = null;
+let liveMaps = [];
+const track = m => { liveMaps.push(m); return m; };
 async function router() {
   const route = (location.hash.replace(/^#\//, '') || 'overview').split('?')[0];
-  if (currentMap) { currentMap.remove(); currentMap = null; }
+  liveMaps.forEach(m => { try { m.remove(); } catch { } }); liveMaps = [];
   if (route.startsWith('share/')) return views.share($('#view'), route.slice(6));
   if (S.pid) S.alerts = await api('/alerts?pid=' + S.pid).catch(() => []);
   $('#sidebar').classList.remove('open');
@@ -54,8 +56,22 @@ async function router() {
   $('#pageTitle').textContent = TITLES[view] || 'RankPilot';
   $('#pageActions').innerHTML = '';
   const el = $('#view'); el.innerHTML = '<div class="muted"><span class="spinner"></span> Loading…</div>';
-  try { await (views[view] || views.overview)(el, S.project); } catch (e) { el.innerHTML = `<div class="card"><b>Something went wrong:</b> ${esc(e.message)}</div>`; console.error(e); }
+  try { await (views[view] || views.overview)(el, S.project); csvButtons(el); } catch (e) { el.innerHTML = `<div class="card"><b>Something went wrong:</b> ${esc(e.message)}</div>`; console.error(e); }
   el.focus({ preventScroll: true });
+}
+
+// ---------------------------------------------------------------- CSV export for every data table
+function tableToCsv(t) {
+  return [...t.rows].map(r => [...r.cells].filter(c => !c.querySelector('input[type=checkbox],button')).map(c => `"${c.innerText.replace(/\s+/g, ' ').trim().replace(/"/g, '""')}"`).join(',')).join('\n');
+}
+function csvButtons(root) {
+  const add = () => root.querySelectorAll('.card table').forEach(t => {
+    if (t.dataset.csv || t.rows.length < 3) return; t.dataset.csv = 1;
+    const b = document.createElement('button'); b.className = 'ghost small csvbtn no-print'; b.textContent = 'CSV'; b.title = 'Download this table as CSV';
+    b.onclick = () => { const h = t.closest('.card')?.querySelector('h2')?.childNodes[0]?.textContent?.trim() || 'table'; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([tableToCsv(t)], { type: 'text/csv' })); a.download = `${(S.project?.name || 'rankpilot')}-${h}`.replace(/[^\w-]+/g, '-').toLowerCase() + '.csv'; a.click(); };
+    (t.closest('.table-wrap') || t).insertAdjacentElement('beforebegin', b);
+  });
+  add(); new MutationObserver(add).observe(root, { childList: true, subtree: true });
 }
 
 // ---------------------------------------------------------------- tiny charts
@@ -137,7 +153,7 @@ function groupTrend(trend) {
 const doneKey = pid => 'done:' + pid;
 function taskHtml(t) {
   const done = store.get(doneKey(S.pid), []).includes(t.title);
-  return `<div class="task ${done ? 'done' : ''}"><input type="checkbox" data-task="${esc(t.title)}" ${done ? 'checked' : ''} aria-label="Mark done"><div><div class="t-title">${esc(t.title)}</div><div class="t-detail">${esc(t.detail)}</div></div><div style="text-align:right"><span class="pill">${esc(t.area)}</span><div class="small muted" style="margin-top:4px">${t.impact} impact · ${t.effort}</div>${t.link ? `<a class="small" href="#/${t.link}">Open →</a>` : ''}</div></div>`;
+  return `<div class="task ${done ? 'done' : ''}"><input type="checkbox" data-task="${esc(t.title)}" ${done ? 'checked' : ''} aria-label="Mark done"><div><div class="t-title">${esc(t.title)}</div><div class="t-detail">${esc(t.detail)}</div></div><div style="text-align:right"><span class="pill">${esc(t.area)}</span><div class="small muted" style="margin-top:4px">${t.impact} impact · ${t.effort}</div>${t.link ? `<a class="small btn ${t.link.includes('?') ? '' : 'ghost'}" style="margin-top:4px;padding:3px 10px;${t.link.includes('?') ? '' : 'background:transparent;color:var(--accent);border:1px solid var(--border)'}" href="#/${t.link}">${t.link.includes('?') ? 'Do it →' : 'Open →'}</a>` : ''}</div></div>`;
 }
 document.addEventListener('change', e => {
   if (!e.target.matches('[data-task]')) return;
@@ -158,40 +174,88 @@ views.plan = async (el, p) => {
 
 // ---------------------------------------------------------------- Map grid
 const pinClass = r => !r ? 'nf' : r <= 3 ? 'r1' : r <= 10 ? 'r2' : r <= 15 ? 'r3' : 'r4';
+const pinColor = r => !r ? '#6b6a65' : r <= 3 ? '#0ca30c' : r <= 10 ? '#b98400' : r <= 15 ? '#e0632f' : '#d03b3b';
+const haversineKm = (a, b) => { const R = 6371, t = x => x * Math.PI / 180; const d = Math.sin(t(b.lat - a.lat) / 2) ** 2 + Math.cos(t(a.lat)) * Math.cos(t(b.lat)) * Math.sin(t(b.lng - a.lng) / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(d)); };
+function miniGrid(points, size = 64) {
+  if (!points.length) return '';
+  const lats = points.map(p => p.lat), lngs = points.map(p => p.lng);
+  const [a1, a2, o1, o2] = [Math.min(...lats), Math.max(...lats), Math.min(...lngs), Math.max(...lngs)];
+  const r = Math.max(2, size / (Math.sqrt(points.length) * 2.6));
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true">${points.map(p => `<circle cx="${r + ((p.lng - o1) / ((o2 - o1) || 1)) * (size - 2 * r)}" cy="${r + ((a2 - p.lat) / ((a2 - a1) || 1)) * (size - 2 * r)}" r="${r}" fill="${pinColor(p.rank)}"/>`).join('')}</svg>`;
+}
+function distBar(dist, total) {
+  const segs = [['good', '1–3 Good', '#0ca30c'], ['average', '4–10 Average', '#b98400'], ['poor', '11–20 Poor', '#e0632f'], ['out', 'Not in top 20', '#6b6a65']];
+  return `<div class="distbar" role="img" aria-label="Rank distribution">${segs.filter(([k]) => dist[k]).map(([k, , c]) => `<span style="flex:${dist[k]};background:${c}" title="${dist[k]} points"></span>`).join('')}</div><div class="legend">${segs.map(([k, l, c]) => `<span><i style="background:${c}"></i>${l}: <b>${dist[k] || 0}</b> (${Math.round((100 * (dist[k] || 0)) / (total || 1))}%)</span>`).join('')}</div>`;
+}
+
 views.maps = async (el, p) => {
-  let lastGrid = null;
+  let lastGrid = null, fullCache = {};
   const runs = await api(`/projects/${p.id}/runs?type=grid&limit=40`);
   const kwOpts = [...new Set([...(p.gridKeywords || []), ...(p.keywords || [])])];
+  const setup = { center: null, excluded: new Set() };
+  const src = S.status.providers.dataforseo ? 'DataForSEO' : S.status.providers.places ? 'Google Places' : 'demo';
   el.innerHTML = `
   <div class="card no-print"><div class="row">
     <label style="flex:2">Keyword<input id="kw" list="kwlist" placeholder="e.g. ${esc((p.category || 'plumber').toLowerCase())} near me" value="${esc(kwOpts[0] || '')}"><datalist id="kwlist">${kwOpts.map(k => `<option value="${esc(k)}">`).join('')}</datalist></label>
-    <label>Grid<select id="size">${[3, 5, 7, 9, 11, 13, 15].map(n => `<option ${n === 7 ? 'selected' : ''} value="${n}">${n}×${n} (${n * n} pts)</option>`).join('')}</select></label>
+    <label>Grid<select id="size">${[3, 5, 7, 9, 11, 13, 15].map(n => `<option ${n === 7 ? 'selected' : ''} value="${n}">${n}×${n}${n === 5 ? ' (recommended start)' : ''}</option>`).join('')}</select></label>
     <label>Radius<select id="radius">${[0.5, 1, 2, 3, 5, 8, 10, 15, 25].map(n => `<option ${n === 3 ? 'selected' : ''} value="${n}">${n} mi</option>`).join('')}</select></label>
     <label>Shape<select id="shape"><option value="square">Square</option><option value="circle">Circle (cheaper)</option><option value="rings">Distance rings</option></select></label>
     <label>Data source<select id="source"><option value="auto">Best available</option><option value="dataforseo">DataForSEO (GPS-exact)</option><option value="google_places">Google Places</option><option value="demo">Demo</option></select></label>
     <button id="scan">Run scan</button></div>
-    <div class="row small muted" style="margin-top:8px"><span>History:</span><select id="hist" class="shrink" style="max-width:420px"><option value="">Latest scan</option>${runs.map(r => `<option value="${r.id}">${esc(r.keyword)} · ${esc(r.summary)} · ${new Date(r.createdAt).toLocaleString()}</option>`).join('')}</select>
-    <label class="shrink" style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="cmpToggle" style="width:auto"> Compare with previous scan of same keyword</label></div>
+    <details id="prev" style="margin-top:10px"><summary class="small"><b>Adjust grid</b> - <span id="ptCount"></span></summary>
+      <p class="small muted">Drag the blue center to move the grid. Tap a dot to switch it off (lakes, fields, areas you don't serve) - fewer points means cheaper scans.</p>
+      <div id="prevMap" class="map small"></div><div class="row" style="margin-top:6px"><button class="ghost small shrink" id="resetGrid">Reset to my location</button></div></details>
   </div>
   <div id="gridOut" style="margin-top:16px"></div>`;
+
+  const params = () => ({ size: +$('#size').value, radiusMiles: +$('#radius').value, shape: $('#shape').value, center: setup.center, excluded: [...setup.excluded] });
+  let prevMap = null, prevLayer = null, centerMk = null;
+  async function refreshPreview() {
+    const plan = await api(`/projects/${p.id}/grid/preview`, { body: { ...params(), excluded: [] } });
+    const active = plan.points.filter(x => !setup.excluded.has(`${x.row},${x.col}`)).length;
+    $('#ptCount').textContent = `${active} points · ${active} ${src === 'demo' ? 'simulated' : src} lookups per keyword`;
+    if (!$('#prev').open) return;
+    if (!prevMap) {
+      prevMap = track(L.map('prevMap', { scrollWheelZoom: false }));
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(prevMap);
+      centerMk = L.marker([plan.center.lat, plan.center.lng], { draggable: true, title: 'Grid center' }).addTo(prevMap);
+      centerMk.on('dragend', () => { const ll = centerMk.getLatLng(); setup.center = { lat: ll.lat, lng: ll.lng }; refreshPreview(); });
+      L.circleMarker([p.lat, p.lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#2a78d6', fillOpacity: 1 }).addTo(prevMap).bindTooltip('Your business');
+      prevMap.fitBounds(plan.points.map(x => [x.lat, x.lng]), { padding: [20, 20] });
+    }
+    if (prevLayer) prevLayer.remove();
+    prevLayer = L.layerGroup(plan.points.map(x => {
+      const key = `${x.row},${x.col}`, off = setup.excluded.has(key);
+      return L.circleMarker([x.lat, x.lng], { radius: 7, weight: 2, color: off ? '#999' : '#2a78d6', fillColor: off ? '#fff' : '#2a78d6', fillOpacity: off ? 0.4 : 0.8 })
+        .on('click', () => { off ? setup.excluded.delete(key) : setup.excluded.add(key); refreshPreview(); });
+    })).addTo(prevMap);
+  }
+  ['size', 'radius', 'shape'].forEach(id => $('#' + id).onchange = () => { setup.excluded.clear(); refreshPreview(); });
+  $('#prev').addEventListener('toggle', () => { refreshPreview(); setTimeout(() => prevMap?.invalidateSize(), 50); });
+  $('#resetGrid').onclick = () => { setup.center = null; setup.excluded.clear(); centerMk?.setLatLng([p.lat, p.lng]); refreshPreview(); };
+  refreshPreview();
+
   $('#scan').onclick = e => busy(e.currentTarget, async () => {
-    const body = { keyword: $('#kw').value.trim(), size: +$('#size').value, radiusMiles: +$('#radius').value, shape: $('#shape').value, source: $('#source').value };
+    const body = { keyword: $('#kw').value.trim(), source: $('#source').value, ...params() };
     const run = await api(`/projects/${p.id}/grid`, { body });
     if (!(p.gridKeywords || []).includes(body.keyword)) { await api(`/projects/${p.id}`, { method: 'PUT', body: { gridKeywords: [...(p.gridKeywords || []), body.keyword] } }); await refreshProjects(); }
-    showGrid(run);
+    fullCache[run.id] = run; showGrid(run);
   });
-  $('#hist').onchange = async e => showGrid(e.target.value ? await api('/runs/' + e.target.value) : await api(`/projects/${p.id}/latest/grid`));
-  $('#cmpToggle').onchange = async () => { if (lastGrid) showGrid(lastGrid); };
   const latest = await api(`/projects/${p.id}/latest/grid`);
-  if (latest) showGrid(latest); else $('#gridOut').innerHTML = `<div class="card empty"><h2>See your Google Maps rankings block by block</h2><p>Pick a keyword customers search and run a scan. Each pin on the map shows where you rank when someone searches from that exact spot.</p></div>`;
+  if (latest) showGrid(latest); else $('#gridOut').innerHTML = `<div class="card empty"><h2>See your Google Maps rankings block by block</h2><p>Pick a keyword customers search and run a scan. Each pin shows where you rank when someone searches from that exact spot. A 5×5 grid is a good place to start.</p></div>`;
 
-  async function showGrid(run) {
+  async function full(run) { if (run.data.points.every(x => x.results.length <= 3) && !fullCache[run.id]) fullCache[run.id] = await api('/runs/' + run.id); return fullCache[run.id] || run; }
+
+  async function showGrid(run, compareId) {
     lastGrid = run;
     const d = run.data, m = d.metrics;
-    let prevRun = null;
-    if ($('#cmpToggle').checked) { const prevMeta = runs.filter(r => r.keyword === run.keyword && r.id !== run.id && r.createdAt < run.createdAt)[0]; if (prevMeta) prevRun = await api('/runs/' + prevMeta.id); }
-    const dl = (v, invert) => v == null ? '' : `<span class="delta ${(invert ? -v : v) > 0 ? 'up' : (invert ? -v : v) < 0 ? 'down' : ''}">${v > 0 ? '▲' : v < 0 ? '▼' : ''}${Math.abs(v)}</span>`;
+    const hist = await api(`/projects/${p.id}/grid/history?keyword=${encodeURIComponent(run.keyword)}`);
+    const prevRun = compareId ? await api('/runs/' + compareId) : null;
+    const dl = (v, invert) => v == null || v === 0 ? '' : `<span class="delta ${(invert ? -v : v) > 0 ? 'up' : (invert ? -v : v) < 0 ? 'down' : ''}">${v > 0 ? '▲' : v < 0 ? '▼' : ''}${Math.abs(v)}</span>`;
+    const me = d.leaderboard.find(c => c.isTarget);
+    const rivals = d.leaderboard.filter(c => !c.isTarget);
     $('#gridOut').innerHTML = `
+      ${hist.length > 1 ? `<div class="card no-print" style="margin-bottom:16px"><h2>History - "${esc(run.keyword)}" <span class="muted small">tap a scan to open it · tap ⇆ to compare it with the one shown</span></h2><div class="hstrip">${hist.slice(0, 14).map(h => `<div class="hthumb ${h.id === run.id ? 'on' : ''}"><button class="ghost hopen" data-id="${h.id}" aria-label="Open scan from ${new Date(h.createdAt).toLocaleDateString()}">${miniGrid(h.points)}<span class="small">${new Date(h.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span><span class="small muted">SoLV ${h.metrics.solv}%</span></button>${h.id !== run.id ? `<button class="ghost small hcmp" data-id="${h.id}" title="Compare then vs now">⇆</button>` : ''}</div>`).join('')}</div></div>` : ''}
       <div class="grid g6">
         <div class="card stat"><span class="label">Share of Local Voice</span><span class="value">${m.solv}%</span><span class="sub">of points in 3-pack ${d.delta ? dl(d.delta.solv) : ''}</span></div>
         <div class="card stat"><span class="label">Avg rank (where found)</span><span class="value">${m.arp ?? '–'}</span><span class="sub">ARP ${d.delta ? dl(d.delta.arp) : ''}</span></div>
@@ -202,30 +266,78 @@ views.maps = async (el, p) => {
       </div>
       <div class="grid split" style="margin-top:16px">
         <div class="card"><h2>"${esc(d.config.keyword)}" · ${d.config.size}×${d.config.size}, ${d.config.radiusMiles} mi <span class="muted small" style="margin-left:auto">${new Date(run.createdAt).toLocaleString()}</span></h2>
-          ${prevRun ? `<div class="grid g2"><div><div class="small muted">Previous · ${new Date(prevRun.createdAt).toLocaleDateString()}</div><div id="map2" class="map"></div></div><div><div class="small muted">This scan</div><div id="map" class="map"></div></div></div>` : '<div id="map" class="map"></div>'}
-          <div class="legend"><span><i style="background:#0ca30c"></i>1–3 (map pack)</span><span><i style="background:#b98400"></i>4–10</span><span><i style="background:#e0632f"></i>11–15</span><span><i style="background:#d03b3b"></i>16–20</span><span><i style="background:#6b6a65"></i>Not in top 20</span><span>· Click any pin to see who outranks you there</span></div>
+          ${m.distribution ? distBar(m.distribution, m.points) : ''}
+          <div class="row" style="margin:10px 0"><label class="shrink" style="flex-direction:row;align-items:center;gap:8px">Show rankings for <select id="asBiz" style="width:auto;max-width:260px"><option value="">You</option>${rivals.slice(0, 12).map((c, i) => `<option value="${i}">${esc(c.name)}</option>`).join('')}</select></label></div>
+          ${prevRun ? `<div class="grid g2"><div><div class="small muted">Then · ${new Date(prevRun.createdAt).toLocaleDateString()} · SoLV ${prevRun.data.metrics.solv}%</div><div id="map2" class="map"></div></div><div><div class="small muted">Now · ${new Date(run.createdAt).toLocaleDateString()} · SoLV ${m.solv}% ${dl(+(m.solv - prevRun.data.metrics.solv).toFixed(1))}</div><div id="map" class="map"></div></div></div>` : '<div id="map" class="map"></div>'}
+          <div class="legend"><span>Tap any pin to see the top 20 from that spot</span></div>
           <div id="pointDetail" style="margin-top:12px"></div></div>
         <div class="card"><h2>What this means</h2>${d.insights.map(i => `<div class="insight ${i.type}"><span class="i">${{ good: '✓', bad: '✕', warn: '!', info: 'i' }[i.type]}</span><span>${esc(i.text)}</span></div>`).join('')}
           <h3>Competitor leaderboard (whole grid)</h3><div class="table-wrap" style="max-height:420px"><table><thead><tr><th>#</th><th>Business</th><th class="num">SoLV</th><th class="num">ATRP</th><th class="num">★</th><th class="num">Reviews</th></tr></thead><tbody>
           ${d.leaderboard.slice(0, 15).map((c, i) => `<tr class="${c.isTarget ? 'me' : ''}"><td>${i + 1}</td><td>${esc(c.name)}${c.isTarget ? ' <span class="pill">you</span>' : ''}</td><td class="num">${c.solv}%</td><td class="num">${c.atrp}</td><td class="num">${c.rating ?? '–'}</td><td class="num">${fmt(c.reviews)}</td></tr>`).join('')}</tbody></table></div></div>
-      </div>`;
-    currentMap = drawGrid('map', d, run.id);
-    if (prevRun) { const m2 = drawGrid('map2', prevRun.data, prevRun.id); currentMap.sync = m2; currentMap.on('move', () => m2.setView(currentMap.getCenter(), currentMap.getZoom(), { animate: false })); }
+      </div>
+      ${rivals.length ? factorsCard(d, me, rivals.slice(0, 3)) : ''}`;
+    drawAll();
+    $('#asBiz').onchange = drawAll;
+    el.querySelectorAll('.hopen').forEach(b => b.onclick = async () => showGrid(await api('/runs/' + b.dataset.id)));
+    el.querySelectorAll('.hcmp').forEach(b => b.onclick = () => showGrid(run, b.dataset.id));
+    async function drawAll() {
+      liveMaps.filter(x => x !== prevMap).forEach(x => x.remove()); liveMaps = liveMaps.filter(x => x === prevMap);
+      const idx = $('#asBiz').value;
+      const target = idx === '' ? null : rivals[+idx];
+      const src1 = target ? await full(run) : run;
+      const rankOf = target ? pt => { const i = (pt.results || []).findIndex(r => (r.placeId && r.placeId === target.placeId) || r.name === target.name); return i >= 0 ? i + 1 : null; } : pt => pt.rank;
+      const m1 = drawGrid('map', src1.data, run.id, rankOf, target);
+      if (prevRun) {
+        const src2 = target ? await full(prevRun) : prevRun;
+        const m2 = drawGrid('map2', src2.data, prevRun.id, rankOf, target);
+        m1.on('move', () => m2.setView(m1.getCenter(), m1.getZoom(), { animate: false }));
+      }
+    }
   }
-  function drawGrid(id, d, runId) {
-    const map = L.map(id, { scrollWheelZoom: false }).setView([d.config.center.lat, d.config.center.lng], 12);
+
+  function factorsCard(d, me, top) {
+    const c = d.config.center;
+    const dist = b => b?.lat != null ? haversineKm(c, b) * 0.621 : null;
+    const myCat = (me?.category || p.category || '').toLowerCase();
+    const cols = [{ ...(me || { name: p.name }), name: 'You', lat: me?.lat ?? p.lat, lng: me?.lng ?? p.lng }, ...top];
+    const tips = [];
+    for (const t of top) {
+      if (me && t.reviews > (me.reviews || 0) * 1.5) tips.push(`${t.name} has ${fmt(t.reviews - (me.reviews || 0))} more reviews. Review count and recency are strong map-pack signals - send review requests after every job.`);
+      if (t.category && myCat && t.category.toLowerCase() !== myCat) tips.push(`${t.name} uses the category "${t.category}". If that describes you too, add it as a secondary category (or primary, if it's your main service).`);
+      if (me && t.rating > (me.rating || 0)) tips.push(`${t.name} is rated ${t.rating} vs your ${me.rating}. Reply to every review and fix the complaints that come up most.`);
+    }
+    const near = top.filter(t => dist(t) != null && dist(t) < (dist(cols[0]) ?? 99) - 0.3);
+    if (near.length) tips.push(`${near.map(t => t.name).join(', ')} ${near.length > 1 ? 'are' : 'is'} closer to the grid center than you. You can't move, but strong relevance (categories, services, website content naming the area) and reviews can outweigh distance.`);
+    const row = (label, f, better) => `<tr><td>${label}</td>${cols.map((b, i) => { const v = f(b); const win = i > 0 && better && better(b, cols[0]); return `<td class="num" ${win ? 'style="color:var(--critical);font-weight:700" title="Better than you"' : ''}>${v ?? '–'}</td>`; }).join('')}</tr>`;
+    return `<div class="card" style="margin-top:16px"><h2>Why they outrank you <span class="muted small">the ranking signals you can see, side by side (red = better than you)</span></h2>
+      <div class="table-wrap"><table><thead><tr><th>Signal</th>${cols.map(b => `<th class="num">${esc(b.name)}</th>`).join('')}</tr></thead><tbody>
+      ${row('Share of Local Voice', b => b.solv != null ? b.solv + '%' : null, (b, y) => b.solv > (y.solv || 0))}
+      ${row('Google rating', b => b.rating, (b, y) => b.rating > (y.rating || 0))}
+      ${row('Reviews', b => fmt(b.reviews), (b, y) => b.reviews > (y.reviews || 0))}
+      ${row('Category', b => esc(b.category || '–'))}
+      ${row('Distance from grid center', b => dist(b) != null ? dist(b).toFixed(1) + ' mi' : null, (b, y) => dist(b) != null && dist(y) != null && dist(b) < dist(y) - 0.3)}
+      ${row('Website', b => esc(b.domain || '–'))}
+      </tbody></table></div>
+      ${tips.length ? `<h3>What to do about it</h3>${[...new Set(tips)].slice(0, 5).map(t => `<div class="insight info"><span class="i">→</span><span>${esc(t)}</span></div>`).join('')}` : ''}</div>`;
+  }
+
+  function drawGrid(id, d, runId, rankOf = pt => pt.rank, as = null) {
+    const map = track(L.map(id, { scrollWheelZoom: false }).setView([d.config.center.lat, d.config.center.lng], 12));
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
     const b = [];
     d.points.forEach(pt => {
-      const icon = L.divIcon({ className: '', html: `<div class="rank-pin ${pinClass(pt.rank)}" title="Rank ${pt.rank ?? '20+'}">${pt.rank ?? '20+'}</div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
-      L.marker([pt.lat, pt.lng], { icon, keyboard: true, title: `Rank ${pt.rank ?? 'not found'}` }).addTo(map).on('click', async () => {
+      const rank = rankOf(pt);
+      const icon = L.divIcon({ className: '', html: `<div class="rank-pin ${pinClass(rank)}" title="Rank ${rank ?? '20+'}">${rank ?? '20+'}</div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
+      L.marker([pt.lat, pt.lng], { icon, keyboard: true, title: `Rank ${rank ?? 'not found'}` }).addTo(map).on('click', async () => {
         let results = pt.results;
-        if (results.length <= 3) { const full = await api('/runs/' + runId); results = full.data.points.find(x => x.lat === pt.lat && x.lng === pt.lng)?.results || results; }
-        $('#pointDetail').innerHTML = `<div class="card" style="background:var(--surface-2)"><b>From this spot</b> (${(pt.distanceM / 1609).toFixed(1)} mi from you): ${pt.rank ? `you rank <b>#${pt.rank}</b>` : 'you are <b>not in the top 20</b>'}<ol class="small" style="margin:8px 0 0">${results.slice(0, 10).map(r => `<li ${r.name === S.project.name ? 'style="font-weight:700"' : ''}>${esc(r.name)} <span class="muted">${r.rating ? '★' + r.rating : ''} ${r.reviews ? '(' + fmt(r.reviews) + ')' : ''}</span></li>`).join('')}</ol></div>`;
+        if (results.length <= 3) { const f = await api('/runs/' + runId); results = f.data.points.find(x => x.lat === pt.lat && x.lng === pt.lng)?.results || results; }
+        const who = as ? as.name : 'you';
+        $('#pointDetail').innerHTML = `<div class="card" style="background:var(--surface-2)"><b>From this spot</b> (${(pt.distanceM / 1609).toFixed(1)} mi from the grid center): ${rank ? `${esc(who)} rank${as ? 's' : ''} <b>#${rank}</b>` : `${esc(who)} ${as ? 'is' : 'are'} <b>not in the top 20</b>`}<ol class="small" style="margin:8px 0 0">${results.slice(0, 20).map(r => `<li ${r.name === S.project.name || (as && r.name === as.name) ? 'style="font-weight:700"' : ''}>${esc(r.name)} <span class="muted">${r.rating ? '★' + r.rating : ''} ${r.reviews ? '(' + fmt(r.reviews) + ')' : ''}</span></li>`).join('')}</ol></div>`;
       });
       b.push([pt.lat, pt.lng]);
     });
-    L.circleMarker([d.config.center.lat, d.config.center.lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#2a78d6', fillOpacity: 1 }).addTo(map).bindTooltip('Your business');
+    const biz = as?.lat != null ? as : d.config.business || d.config.center;
+    L.circleMarker([biz.lat, biz.lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#2a78d6', fillOpacity: 1 }).addTo(map).bindTooltip(as ? as.name : 'Your business');
     map.fitBounds(b, { padding: [24, 24] });
     return map;
   }
@@ -442,6 +554,8 @@ views.content = async (el, p) => {
     <label>Keyword<input id="skw" value="${esc(p.keywords?.[0] || '')}"></label><label style="margin-top:8px">Text<textarea id="stext" rows="12"></textarea></label>
     <div class="row" style="margin-top:8px"><button id="terms" class="ghost shrink">Suggest related terms</button><button id="score" class="shrink">Grade</button></div><div id="terms-out" class="small muted" style="margin-top:8px"></div><div id="sout" style="margin-top:8px"></div></div></div>`;
   let terms = [];
+  const hq = new URLSearchParams(location.hash.split('?')[1] || '');
+  if (hq.get('type') && types[hq.get('type')]) { $('#ctype').value = hq.get('type'); if (hq.get('keyword')) $('#ckw').value = hq.get('keyword'); setTimeout(() => $('#gen').scrollIntoView({ behavior: 'smooth' }), 100); }
   const showBrief = d => {
     const b = d.brief, a = d.analysis;
     terms = (b.mustInclude || []).slice(0, 20);
@@ -501,6 +615,42 @@ views.report = async (el, p) => {
   $('#sendNow').onclick = e => busy(e.currentTarget, async () => { const to = recips(); if (!to.length) throw new Error('Add a recipient'); for (const t of to) { const r = await api(`/projects/${p.id}/report/email`, { body: { to: t } }); toast(r.simulated ? `Simulated (email not configured) - link: ${r.url}` : `Sent to ${t}`, 6000); } });
 };
 
+// ---------------------------------------------------------------- All businesses (roll-up)
+views.locations = async (el) => {
+  const [all, alertsAll] = await Promise.all([api('/projects'), api('/alerts')]);
+  const groups = [...new Set(all.map(p => p.group).filter(Boolean))];
+  let sort = store.get('locSort', 'overall'), grp = store.get('locGroup', ''), mode = store.get('locMode', 'list');
+  const val = (p, k) => ({ overall: p.scorecard.overall, solv: p.grid?.metrics.solv, arp: p.grid?.metrics.arp != null ? -p.grid.metrics.arp : null, delta: p.grid?.delta?.solv, rating: p.reviewsSummary?.rating, reviews: p.reviewsSummary?.total, name: null }[k]);
+  const render = () => {
+    const rows = all.filter(p => !grp || p.group === grp).sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : (val(b, sort) ?? -1e9) - (val(a, sort) ?? -1e9));
+    const tot = rows.reduce((t, p) => ({ n: t.n + 1, solv: t.solv + (p.grid?.metrics.solv || 0), g: t.g + (p.grid ? 1 : 0), rev: t.rev + (p.reviewsSummary?.total || 0) }), { n: 0, solv: 0, g: 0, rev: 0 });
+    $('#locOut').innerHTML = `<div class="grid g4" style="margin-bottom:16px"><div class="card stat"><span class="label">Businesses</span><span class="value">${tot.n}</span></div><div class="card stat"><span class="label">Avg map-pack coverage</span><span class="value">${tot.g ? (tot.solv / tot.g).toFixed(1) + '%' : '–'}</span></div><div class="card stat"><span class="label">Total reviews</span><span class="value">${fmt(tot.rev)}</span></div><div class="card stat"><span class="label">Unread alerts</span><span class="value">${alertsAll.filter(a => !a.read).length}</span></div></div>
+    ${mode === 'map' ? '<div class="card"><div id="locMap" class="map"></div></div>' : `<div class="card"><div class="table-wrap"><table><thead><tr><th>Business</th><th>Group</th><th class="num">Overall</th><th>Map keyword</th><th class="num">SoLV</th><th class="num">Change</th><th class="num">Avg rank</th><th class="num">Rating</th><th class="num">Reviews</th><th></th></tr></thead><tbody>
+    ${rows.map(p => `<tr><td><b>${esc(p.name)}</b><div class="small muted">${esc([p.category, p.city].filter(Boolean).join(' · '))}</div></td><td class="small">${esc(p.group || '')}</td><td class="num"><b>${p.scorecard.overall ?? '–'}</b></td><td class="small">${esc(p.grid?.keyword || '–')}</td><td class="num">${p.grid ? p.grid.metrics.solv + '%' : '–'}</td><td class="num">${p.grid?.delta?.solv ? `<span class="delta ${p.grid.delta.solv > 0 ? 'up' : p.grid.delta.solv < 0 ? 'down' : ''}">${p.grid.delta.solv > 0 ? '▲' : p.grid.delta.solv < 0 ? '▼' : ''}${Math.abs(p.grid.delta.solv)}</span>` : ''}</td><td class="num">${p.grid?.metrics.arp ?? '–'}</td><td class="num">${p.reviewsSummary?.rating ?? '–'}</td><td class="num">${fmt(p.reviewsSummary?.total)}</td><td><button class="ghost small open-p" data-id="${p.id}">Open</button></td></tr>`).join('')}</tbody></table></div></div>`}`;
+    el.querySelectorAll('.open-p').forEach(b => b.onclick = () => { S.pid = b.dataset.id; store.set('pid', S.pid); location.hash = '#/overview'; });
+    if (mode === 'map') {
+      const map = track(L.map('locMap', { scrollWheelZoom: false }));
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+      const pts = rows.filter(p => p.lat != null);
+      pts.forEach(p => {
+        const r = p.grid?.metrics.arp ? Math.round(p.grid.metrics.arp) : null;
+        L.marker([p.lat, p.lng], { icon: L.divIcon({ className: '', html: `<div class="rank-pin ${pinClass(r)}" style="width:auto;padding:0 8px;border-radius:14px">${p.grid ? p.grid.metrics.solv + '%' : '–'}</div>`, iconSize: [52, 30], iconAnchor: [26, 15] }) })
+          .addTo(map).bindPopup(`<b>${esc(p.name)}</b><br>Overall ${p.scorecard.overall ?? '–'} · SoLV ${p.grid ? p.grid.metrics.solv + '%' : '–'}<br><a href="#/overview" data-pid="${p.id}" class="pop-open">Open</a>`);
+      });
+      map.on('popupopen', e => e.popup.getElement().querySelector('.pop-open')?.addEventListener('click', ev => { S.pid = ev.target.dataset.pid; store.set('pid', S.pid); }));
+      pts.length ? map.fitBounds(pts.map(p => [p.lat, p.lng]), { padding: [40, 40], maxZoom: 12 }) : map.setView([39.8, -98.6], 4);
+    }
+  };
+  el.innerHTML = `<div class="card no-print" style="margin-bottom:16px"><div class="row" style="align-items:end"><label>Group<select id="lg"><option value="">All groups</option>${groups.map(g => `<option ${g === grp ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></label>
+    <label>Sort by<select id="ls">${[['overall', 'Overall score'], ['solv', 'Map-pack coverage'], ['delta', 'Biggest gain'], ['arp', 'Best avg rank'], ['rating', 'Rating'], ['reviews', 'Reviews'], ['name', 'Name']].map(([k, l]) => `<option value="${k}" ${k === sort ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <div class="shrink tabs" style="margin:0;border:0"><button data-m="list" class="${mode === 'list' ? 'active' : ''}">List</button><button data-m="map" class="${mode === 'map' ? 'active' : ''}">Map</button></div><a class="btn shrink" href="#/new">+ Add business</a></div>
+    <p class="small muted" style="margin:8px 0 0">Set a group (e.g. "Bail bonds", "Real estate", a client name) in each business's Project Settings to filter here.</p></div><div id="locOut"></div>`;
+  $('#lg').onchange = e => { grp = e.target.value; store.set('locGroup', grp); render(); };
+  $('#ls').onchange = e => { sort = e.target.value; store.set('locSort', sort); render(); };
+  el.querySelector('.tabs').onclick = e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; store.set('locMode', mode); el.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b === e.target)); liveMaps.forEach(m => m.remove()); liveMaps = []; render(); };
+  render();
+};
+
 // ---------------------------------------------------------------- Alerts
 views.alerts = async (el, p) => {
   const list = await api('/alerts?pid=' + p.id);
@@ -535,12 +685,34 @@ views.requests = async (el, p) => {
       <label style="margin-top:8px">Email<textarea name="reviewEmail" rows="7">${esc(d.templates.email)}</textarea></label>
       <label style="margin-top:8px">Send one reminder if not clicked after (days, 0 = never)<input name="reviewFollowupDays" type="number" min="0" max="30" value="${p.reviewFollowupDays ?? 3}"></label>
       <p class="small muted">Placeholders: <span class="kbd">{first}</span> <span class="kbd">{business}</span> <span class="kbd">{city}</span> <span class="kbd">{link}</span> (tracked, so you see who clicked).</p>
-      <button type="submit">Save templates</button></form></div></div>`;
+      <button type="submit">Save templates</button></form>
+      <h3>QR code &amp; counter card</h3><p class="small muted">For receipts, invoices, the front desk or your truck. It points to your Google review link.</p>
+      <div class="row" style="align-items:center"><div class="shrink" id="qrBox" style="background:#fff;padding:8px;border-radius:8px"></div><div><button class="ghost small" id="qrDl">Download QR (PNG)</button><br><button class="ghost small" id="qrCard" style="margin-top:6px">Print a review card</button></div></div>
+      <h3>Reviews widget for your website</h3><p class="small muted">Paste this where you want your latest Google reviews to appear. It shows your most recent reviews unfiltered - hiding bad reviews on your own site breaks Google's rules and the FTC's review rule.</p>
+      <button class="ghost small" id="mkWidget">Get embed code</button><div id="widgetOut" class="small" style="margin-top:6px"></div></div></div>`;
   $('#sendReq').onclick = e => busy(e.currentTarget, async () => {
     const customers = $('#cust').value.split('\n').map(l => l.split(/[,\t]/).map(x => x.trim())).filter(a => a[0]).map(([name, contact = '']) => contact.includes('@') ? { name, email: contact } : { name, phone: contact });
     if (!customers.length) throw new Error('Add at least one customer');
     const r = await api(`/projects/${p.id}/requests`, { body: { customers, delayHours: +$('#delay').value } });
     toast(`Added ${r.added} customer(s)`); router();
+  });
+  const qrUrl = p.reviewUrl || st.reviewUrl;
+  const { default: qrcode } = await import('/vendor/qrcode/qrcode.mjs');
+  const qr = qrcode(0, 'M'); qr.addData(qrUrl); qr.make();
+  $('#qrBox').innerHTML = qr.createSvgTag({ cellSize: 3, margin: 0, scalable: false, alt: 'QR code for your Google review link' });
+  const qrPng = (cell = 10) => { const q = qrcode(0, 'M'); q.addData(qrUrl); q.make(); return q.createDataURL(cell, 2); };
+  $('#qrDl').onclick = () => { const a = document.createElement('a'); a.href = qrPng(12); a.download = 'review-qr.gif'; a.click(); };
+  $('#qrCard').onclick = () => {
+    const w = window.open('', '_blank');
+    w.document.write(`<!doctype html><title>Review card</title><style>body{font-family:system-ui,sans-serif;display:flex;justify-content:center;padding:24px}.c{border:2px solid #222;border-radius:16px;padding:28px;width:340px;text-align:center}h1{font-size:22px;margin:0 0 6px}p{margin:6px 0;color:#333}img{width:220px;height:220px;image-rendering:pixelated}.s{color:#e0a100;font-size:28px;letter-spacing:4px}@media print{button{display:none}}</style><div class="c"><div class="s">★★★★★</div><h1>Enjoyed working with ${esc(p.name)}?</h1><p>Scan to leave us a quick Google review.</p><img src="${qrPng(10)}" alt="QR code"><p style="font-size:12px;color:#666">It takes less than a minute. Thank you!</p><button onclick="print()">Print</button></div>`);
+    w.document.close();
+  };
+  $('#mkWidget').onclick = e => busy(e.currentTarget, async () => {
+    const { token } = await api(`/projects/${p.id}/widget`, { body: {} });
+    const url = `${location.origin}/widget/${token}`;
+    const code = `<iframe src="${url}" title="Google reviews for ${esc(p.name)}" style="width:100%;max-width:520px;height:640px;border:0" loading="lazy"></iframe>`;
+    $('#widgetOut').innerHTML = `<textarea readonly rows="3" style="font-family:monospace;font-size:12px">${esc(code)}</textarea><div class="row" style="margin-top:4px"><button class="ghost small shrink" id="wcopy">Copy code</button><a class="small shrink" href="${esc(url)}" target="_blank" rel="noopener">Preview</a><span class="small muted">Add <span class="kbd">?theme=dark</span> or <span class="kbd">?n=8</span> to the URL to customise.</span></div>${location.hostname === 'localhost' ? '<p class="small" style="color:var(--critical)">This app is running on localhost, so the widget only works once the app is online.</p>' : ''}`;
+    $('#wcopy').onclick = () => { navigator.clipboard.writeText(code); toast('Copied'); };
   });
   $('#tplf').onsubmit = async ev => { ev.preventDefault(); await busy(ev.target.querySelector('button'), async () => { await api(`/projects/${p.id}`, { method: 'PUT', body: formData(ev.target) }); await refreshProjects(); toast('Saved'); }); };
   el.querySelectorAll('.resend').forEach(b => b.onclick = e => busy(e.currentTarget, async () => { await api(`/projects/${p.id}/requests/${b.dataset.id}/send`, { body: {} }); router(); }));
@@ -631,17 +803,27 @@ function projectForm(p = {}) {
     <label>Google Place ID<input name="placeId" value="${esc(p.placeId)}" placeholder="auto-filled when you pick from Google"></label>
     <label>Automatic re-scans<select name="schedule">${['weekly', 'daily', 'off'].map(s => `<option ${(p.schedule || 'weekly') === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
     <label class="span2">About the business (helps AI write accurate content)<textarea name="about" rows="3">${esc(p.about)}</textarea></label>
-    <label class="span2">Tracked keywords (one per line)<textarea name="keywords" rows="4">${esc((p.keywords || []).join('\n'))}</textarea></label>
+    <label class="span2">Tracked keywords (one per line) <button type="button" class="ghost small" id="sugKw" style="align-self:flex-start">Suggest keywords</button><textarea name="keywords" rows="4">${esc((p.keywords || []).join('\n'))}</textarea></label>
   </div>`;
 }
+function bindSuggest(form) {
+  const b = form.querySelector('#sugKw'); if (!b) return;
+  b.onclick = e => busy(e.currentTarget, async () => {
+    const f = n => form.querySelector(`[name=${n}]`).value;
+    if (!f('category')) throw new Error('Enter the primary category first');
+    const { keywords } = await api('/suggest-keywords', { body: { category: f('category'), city: f('city'), name: f('name') } });
+    const ta = form.querySelector('[name=keywords]'); ta.value = [...new Set([...ta.value.split('\n').map(x => x.trim()).filter(Boolean), ...keywords])].join('\n');
+  });
+}
 function bindPicker(form) {
+  bindSuggest(form);
   const lat = form.querySelector('[name=lat]'), lng = form.querySelector('[name=lng]');
   const center = lat.value ? [+lat.value, +lng.value] : [39.83, -98.58];
   const map = L.map('pickMap').setView(center, lat.value ? 14 : 4);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
   let mk = lat.value ? L.marker(center).addTo(map) : null;
   map.on('click', e => { lat.value = e.latlng.lat.toFixed(6); lng.value = e.latlng.lng.toFixed(6); mk ? mk.setLatLng(e.latlng) : (mk = L.marker(e.latlng).addTo(map)); });
-  currentMap = map; return map;
+  return track(map);
 }
 const formData = f => Object.fromEntries(new FormData(f).entries());
 
@@ -676,6 +858,7 @@ views.new = async (el) => {
 };
 views.settings = async (el, p) => {
   el.innerHTML = `<div class="wizard"><div class="card"><form id="pf">${projectForm(p)}<label style="margin-top:12px">AI visibility prompts (one per line)<textarea name="aiPrompts" rows="5">${esc((p.aiPrompts || []).join('\n'))}</textarea></label><label style="margin-top:12px">Map keywords re-scanned automatically (one per line)<textarea name="gridKeywords" rows="3">${esc((p.gridKeywords || []).join('\n'))}</textarea></label>
+    <label style="margin-top:12px">Group (for the All Businesses page)<input name="group" value="${esc(p.group || '')}" placeholder="e.g. Bail bonds, Real estate, Client: Acme"></label>
     <h3>Alerts</h3><label>Email alerts to (negative reviews, ranking/map/AI drops, site-health drops)<input name="alertEmail" type="email" value="${esc(p.alertEmail || '')}" placeholder="you@business.com"></label>
     <h3>Google Search Console & GA4</h3><div class="grid g2"><label>Search Console property<input name="gscSite" value="${esc(p.gscSite || '')}" placeholder="sc-domain:${esc(p.domain || 'example.com')}"></label><label>GA4 property ID<input name="ga4Property" value="${esc(p.ga4Property || '')}" placeholder="123456789"></label></div>
     <div class="row" style="margin-top:16px"><button type="submit" class="shrink">Save</button><button type="button" id="del" class="danger shrink">Delete project</button></div></form></div></div>`;

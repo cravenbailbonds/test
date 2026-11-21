@@ -123,3 +123,18 @@ export async function backlinkProfile(project, compare = []) {
   profiles.slice(1).forEach(p => (p.topReferrers || []).forEach(r => { if (!mine.has(r.domain)) (gap[r.domain] ||= { domain: r.domain, authority: r.authority, linksTo: [] }).linksTo.push(p.domain); }));
   return addRun(project.id, 'backlinks', { profiles, gap: Object.values(gap).sort((a, b) => b.linksTo.length - a.linksTo.length || b.authority - a.authority).slice(0, 30), source: live ? 'dataforseo' : 'demo' });
 }
+
+/** Starter keywords for a new business (setup wizard): AI when available, otherwise proven local patterns. */
+export async function suggestKeywords(category = '', city = '', name = '') {
+  const cat = String(category).toLowerCase().trim(), c = String(city).split(',')[0].trim().toLowerCase();
+  if (!cat) return [];
+  if (aiAvailable()) {
+    try {
+      const out = await generateJSON('You are a local SEO strategist. Return only keywords real customers type into Google Maps or Google search.',
+        `Business: ${name || 'a local business'}; category: ${category}; city: ${city}. Give 10 high-intent local keywords: the main service + city, "near me" variants, 2-3 specific services this kind of business offers, and urgent/emergency phrasing if relevant. Lowercase.`,
+        { type: 'object', additionalProperties: false, required: ['keywords'], properties: { keywords: { type: 'array', items: { type: 'string' } } } }, { effort: 'low' });
+      if (out.keywords?.length) return out.keywords.slice(0, 12);
+    } catch { }
+  }
+  return [...new Set([c ? `${cat} ${c}` : cat, `${cat} near me`, `best ${cat}${c ? ' in ' + c : ''}`, `${cat} near me open now`, `24 hour ${cat}${c ? ' ' + c : ''}`, `affordable ${cat}${c ? ' ' + c : ''}`, `${cat} company${c ? ' ' + c : ''}`])];
+}

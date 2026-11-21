@@ -180,3 +180,11 @@ body.public #view { margin: 0 auto; }
   #topbar h1 { font-size: 18px; }
   #pageActions button { padding: 7px 10px; }
 }
+.distbar { display: flex; gap: 2px; height: 12px; border-radius: 4px; overflow: hidden; margin: 4px 0; }
+.distbar span { display: block; min-width: 3px; }
+.hstrip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.hthumb { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: none; }
+.hthumb .hopen { flex-direction: column; gap: 2px; padding: 6px; border-radius: 8px; }
+.hthumb.on .hopen { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.hthumb .hcmp { padding: 0 8px; }
+.csvbtn { float: right; margin: -4px 0 6px 8px; }
