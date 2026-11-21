@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RankPilot</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232a78d6'/><path d='M16 6c-4 0-7 3-7 7 0 5 7 13 7 13s7-8 7-13c0-4-3-7-7-7zm0 10a3 3 0 110-6 3 3 0 010 6z' fill='white'/></svg>">
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="brand"><span class="logo">◉</span> RankPilot</div>
+      <select id="projectSelect" aria-label="Project"></select>
+      <nav id="nav"></nav>
+      <div class="side-foot"><div id="providerBadges"></div><button id="themeToggle" class="ghost small" type="button">Toggle theme</button></div>
+    </aside>
+    <main>
+      <header id="topbar"><button id="menuBtn" class="ghost" aria-label="Menu">☰</button><h1 id="pageTitle"></h1><div id="pageActions"></div></header>
+      <section id="view" tabindex="-1"></section>
+    </main>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/vendor/leaflet/leaflet.js"></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
