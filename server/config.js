@@ -27,6 +27,21 @@ export const config = {
   dfsLogin: process.env.DATAFORSEO_LOGIN || '',
   dfsPassword: process.env.DATAFORSEO_PASSWORD || '',
   auditMaxPages: Number(process.env.AUDIT_MAX_PAGES || 60),
+  publicUrl: (process.env.PUBLIC_URL || '').replace(/\/$/, ''),
+  openaiKey: process.env.OPENAI_API_KEY || '',
+  openaiModel: process.env.OPENAI_MODEL || 'gpt-5-mini',
+  geminiKey: process.env.GEMINI_API_KEY || '',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  perplexityKey: process.env.PERPLEXITY_API_KEY || '',
+  perplexityModel: process.env.PERPLEXITY_MODEL || 'sonar',
+  resendKey: process.env.RESEND_API_KEY || '',
+  emailFrom: process.env.EMAIL_FROM || '',
+  twilioSid: process.env.TWILIO_ACCOUNT_SID || '',
+  twilioToken: process.env.TWILIO_AUTH_TOKEN || '',
+  twilioFrom: process.env.TWILIO_FROM || '',
+  googleSaFile: process.env.GOOGLE_SERVICE_ACCOUNT_FILE || '',
+  pagespeedKey: process.env.PAGESPEED_API_KEY || '',
+  appPassword: process.env.APP_PASSWORD || '',
 };
 
 export function providerStatus() {
@@ -34,5 +49,11 @@ export function providerStatus() {
     ai: Boolean(config.anthropicKey || process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_PROFILE),
     places: Boolean(config.placesKey),
     dataforseo: Boolean(config.dfsLogin && config.dfsPassword),
+    openai: Boolean(config.openaiKey),
+    gemini: Boolean(config.geminiKey),
+    perplexity: Boolean(config.perplexityKey),
+    email: Boolean(config.resendKey && config.emailFrom),
+    sms: Boolean(config.twilioSid && config.twilioToken && config.twilioFrom),
+    google: Boolean(config.googleSaFile),
   };
 }

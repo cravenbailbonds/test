@@ -6,6 +6,7 @@ import * as places from '../providers/places.js';
 import * as dfs from '../providers/dataforseo.js';
 import { demoMapResults } from '../providers/demo.js';
 import { addRun, listRuns } from '../store.js';
+import { notify } from './notify.js';
 
 export function pickMapSource(requested) {
   const s = providerStatus();
@@ -19,13 +20,22 @@ export function pickMapSource(requested) {
  * Geo-grid scan: checks the Maps ranking for `keyword` from every grid point.
  * Returns metrics (ARP/ATRP/SoLV/visibility), per-point top results, and a competitor leaderboard.
  */
-export async function runGridScan(project, { keyword, size = 7, radiusMiles = 3, shape = 'square', source = 'auto' }) {
+/** Grid points for a scan, with an optional moved center and points the user switched off (water, empty land). */
+export function planGrid(project, { size = 7, radiusMiles = 3, shape = 'square', center, excluded = [] } = {}) {
+  size = Number(size); radiusMiles = Number(radiusMiles);
+  if (size > 21) throw new Error('Max grid size is 21x21');
+  const c = center && isFinite(center.lat) && isFinite(center.lng) ? { lat: +center.lat, lng: +center.lng } : { lat: project.lat, lng: project.lng };
+  const off = new Set(excluded.map(String));
+  return { center: c, points: buildGrid(c, { size, radiusMiles, shape }).filter(p => !off.has(`${p.row},${p.col}`)) };
+}
+
+export async function runGridScan(project, { keyword, size = 7, radiusMiles = 3, shape = 'square', source = 'auto', center, excluded = [] }) {
   if (!keyword) throw new Error('keyword is required');
   if (project.lat == null || project.lng == null) throw new Error('Project needs a location (lat/lng). Set it in project settings.');
   size = Number(size); radiusMiles = Number(radiusMiles);
-  if (size > 21) throw new Error('Max grid size is 21x21');
   const src = pickMapSource(source);
-  const grid = buildGrid({ lat: project.lat, lng: project.lng }, { size, radiusMiles, shape });
+  const { center: gridCenter, points: grid } = planGrid(project, { size, radiusMiles, shape, center, excluded });
+  if (!grid.length) throw new Error('Every grid point is switched off');
   const spacing = grid.length > 1 ? (radiusMiles * 1609.344 * 2) / Math.max(1, size - 1) : 1000;
 
   const points = await mapLimit(grid, src === 'demo' ? 50 : 6, async pt => {
@@ -54,8 +64,9 @@ export async function runGridScan(project, { keyword, size = 7, radiusMiles = 3,
     since: prev.createdAt,
   } : null;
 
+  if (delta && delta.solv <= -10) await notify(project.id, 'map_drop', `Map pack coverage for "${keyword}" fell ${Math.abs(delta.solv)} pts`, `Share of Local Voice is now ${metrics.solv}%. Check the Map Rank Grid for which areas you lost.`, 'maps', { email: true });
   // Keep top-3 per point in storage (full 20 only for the latest view) to keep the DB small.
-  const data = { config: { keyword, size, radiusMiles, shape, source: src, center: { lat: project.lat, lng: project.lng } }, metrics, delta, insights, leaderboard, points, errors: errors.length };
+  const data = { config: { keyword, size, radiusMiles, shape, source: src, center: gridCenter, business: { lat: project.lat, lng: project.lng }, excluded }, metrics, delta, insights, leaderboard, points, errors: errors.length };
   return addRun(project.id, 'grid', data, { keyword: keyword.toLowerCase(), source: src });
 }
 

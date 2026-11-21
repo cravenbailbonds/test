@@ -25,8 +25,8 @@ export async function mapsAt(keyword, point, zoom = 15) {
 }
 
 /** Organic SERP incl. SERP features and AI Overview references. */
-export async function organic(keyword, { location, point } = {}) {
-  const task = { keyword, language_code: 'en', depth: 100 };
+export async function organic(keyword, { location, point, device = 'desktop' } = {}) {
+  const task = { keyword, language_code: 'en', depth: 100, device };
   if (point) task.location_coordinate = `${point.lat.toFixed(7)},${point.lng.toFixed(7)}`;
   else task.location_name = location || 'United States';
   const [r] = await post('/serp/google/organic/live/advanced', task);
@@ -65,4 +65,26 @@ export async function backlinks(domain) {
     spamScore: s?.backlinks_spam_score ?? null, dofollowPct: s?.backlinks ? Math.round(100 * (1 - (s.referring_links_attributes?.nofollow || 0) / s.backlinks)) : null,
     topReferrers: top, source: 'dataforseo',
   };
+}
+
+/** Every keyword a domain ranks for (Domain Overview / Organic Rankings / Keyword Gap source). */
+export async function rankedKeywords(domain, location, limit = 500) {
+  const [r] = await post('/dataforseo_labs/google/ranked_keywords/live', { target: domain, location_name: location || 'United States', language_code: 'en', limit, order_by: ['keyword_data.keyword_info.search_volume,desc'] });
+  return (r?.items || []).map(i => ({
+    keyword: i.keyword_data?.keyword, volume: i.keyword_data?.keyword_info?.search_volume ?? 0, cpc: i.keyword_data?.keyword_info?.cpc ?? 0,
+    difficulty: i.keyword_data?.keyword_properties?.keyword_difficulty ?? null, intent: i.keyword_data?.search_intent_info?.main_intent || 'unknown',
+    position: i.ranked_serp_element?.serp_item?.rank_group ?? null, url: i.ranked_serp_element?.serp_item?.url ?? null, traffic: Math.round(i.ranked_serp_element?.serp_item?.etv ?? 0),
+  }));
+}
+
+export async function domainOverview(domain, location) {
+  const [r] = await post('/dataforseo_labs/google/domain_rank_overview/live', { target: domain, location_name: location || 'United States', language_code: 'en' });
+  const o = r?.items?.[0]?.metrics?.organic || {};
+  return { keywords: o.count ?? 0, traffic: Math.round(o.etv ?? 0), trafficCost: Math.round(o.estimated_paid_traffic_cost ?? 0), pos1: o.pos_1 ?? 0, pos2_3: o.pos_2_3 ?? 0, pos4_10: o.pos_4_10 ?? 0, pos11_20: o.pos_11_20 ?? 0 };
+}
+
+/** Individual backlinks (one per referring domain) for the Backlink Audit. */
+export async function backlinkList(domain, limit = 500) {
+  const [r] = await post('/backlinks/backlinks/live', { target: domain, mode: 'one_per_domain', limit, include_subdomains: true });
+  return (r?.items || []).map(i => ({ domainFrom: i.domain_from, urlFrom: i.url_from, urlTo: i.url_to, anchor: i.anchor || '', dofollow: Boolean(i.dofollow), spamScore: i.backlink_spam_score ?? i.backlinks_spam_score ?? null, authority: Math.round((i.domain_from_rank || 0) / 10), firstSeen: i.first_seen, tld: (i.domain_from || '').split('.').pop() }));
 }
