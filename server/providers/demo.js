@@ -84,7 +84,9 @@ export function demoKeywordIdeas(seed, location = '') {
     if (city && !['near me', 'open now', 'vs', 'what is'].includes(m)) ideas.add(m === 'how much does' ? `how much does a ${seed} cost in ${city}` : `${phrase} ${city}`);
   }
   if (city) ideas.add(`${seed} in ${city}`);
-  return [...ideas].map(k => demoKeywordMetrics(k, Boolean(city)));
+  // Drop awkward combos where the seed already contained the modifier or city ("emergency emergency ...").
+  const clean = [...ideas].filter(k => { const w = k.split(/\s+/); return new Set(w).size === w.length; });
+  return clean.map(k => demoKeywordMetrics(k, Boolean(city)));
 }
 
 export function demoOrganic(project, keyword) {

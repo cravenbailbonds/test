@@ -1,6 +1,6 @@
 // Unified, prioritized to-do list built from every module's latest results.
 // This is the "just tell me what to do next" layer.
-import { latestRun, listRuns } from '../store.js';
+import { latestRun, listRuns, listContacts } from '../store.js';
 import { aiAvailable, generate } from '../providers/ai.js';
 
 const IMPACT = { high: 3, medium: 2, low: 1 };
@@ -42,6 +42,14 @@ export function buildPlan(project) {
   }
   if (cit) for (const d of cit.data.missing.slice(0, 6)) add({ area: 'Citations', impact: d.weight >= 7 ? 'high' : 'low', effort: 'quick', title: `Claim/create listing: ${d.name}`, detail: `Use identical name, address and phone as Google.${d.url ? ' ' + d.url : ''}`, link: 'citations' });
   else add({ area: 'Citations', impact: 'medium', effort: 'quick', title: 'Check your listings consistency', detail: 'Paste your directory profile URLs to verify name/address/phone match.', link: 'citations' });
+
+  const la = latestRun(project.id, 'linkaudit'), gap = latestRun(project.id, 'gap'), tr = latestRun(project.id, 'traffic');
+  const contacts = listContacts(project.id);
+  if (!contacts.length) add({ area: 'Reviews', impact: 'high', effort: 'quick', title: 'Start sending review requests', detail: 'Text or email every customer a direct Google review link after each job. It\'s the most reliable way to grow reviews.', link: 'requests' });
+  if (la?.data.counts.toxic) add({ area: 'Backlinks', impact: 'low', effort: 'quick', title: `Review ${la.data.counts.toxic} toxic backlinks`, detail: 'Check them and disavow only clear spam.', link: 'backlinks' });
+  if (gap?.data.counts.missing) add({ area: 'Organic', impact: 'medium', effort: 'project', title: `${gap.data.counts.missing} keywords competitors rank for and you don't`, detail: 'Top missing: ' + gap.data.missing.slice(0, 4).map(k => `"${k.keyword}"`).join(', ') + '. Build or expand pages for them.', link: 'research' });
+  if (org?.data.cannibalization?.length) add({ area: 'Organic', impact: 'medium', effort: 'moderate', title: `Fix keyword cannibalization on ${org.data.cannibalization.length} keyword(s)`, detail: 'Two of your pages compete for the same search. Merge them or point one to the other.', link: 'organic' });
+  if (tr?.data.lowCtr?.length) add({ area: 'Organic', impact: 'medium', effort: 'quick', title: `Rewrite titles on ${tr.data.lowCtr.length} queries with low click-through`, detail: 'You rank top 5 but few people click: ' + tr.data.lowCtr.slice(0, 3).map(q => `"${q.key}"`).join(', '), link: 'traffic' });
 
   const seen = new Set();
   return tasks.filter(t => !seen.has(t.title) && seen.add(t.title)).sort((a, b) => b.priority - a.priority);

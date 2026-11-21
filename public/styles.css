@@ -162,3 +162,12 @@ details summary { cursor: pointer; }
   .task > div:last-child { grid-column: 2; text-align: left !important; }
 }
 .card h2 select { font-size: 13px; padding: 4px 8px; }
+body.public #sidebar, body.public #menuBtn { display: none; }
+body.public #app { grid-template-columns: 1fr; }
+body.public #view { margin: 0 auto; }
+.matrix td.cell { text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
+.brandbar { display: flex; align-items: center; gap: 12px; }
+.brandbar img { max-height: 44px; max-width: 200px; }
+.bars .bar-row { grid-template-columns: minmax(70px, 130px) 1fr 48px; }
+.bars .bar-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bars .bar-row > span:last-child { text-align: right; }

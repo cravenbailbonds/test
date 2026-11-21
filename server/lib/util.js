@@ -49,3 +49,17 @@ export async function fetchWithTimeout(url, opts = {}, ms = 15000) {
   try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
   finally { clearTimeout(t); }
 }
+
+const STATES = { AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California', CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', DC: 'District of Columbia', FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa', KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri', MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey', NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming' };
+
+/** "Springfield, OH" / "Springfield" + "OH" -> "Springfield,Ohio,United States" (DataForSEO location_name). ZIP codes pass through. */
+export function dfsLocation(cityOrZip, state) {
+  const s = String(cityOrZip || '').trim();
+  if (!s) return 'United States';
+  if (/^\d{5}$/.test(s)) return `${s},United States`;
+  if (/united states/i.test(s)) return s;
+  let [city, st] = s.split(',').map(x => x.trim());
+  st = st || state || '';
+  st = STATES[st.toUpperCase()] || st;
+  return [city, st, 'United States'].filter(Boolean).join(',');
+}

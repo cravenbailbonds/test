@@ -6,6 +6,7 @@ import * as places from '../providers/places.js';
 import * as dfs from '../providers/dataforseo.js';
 import { demoMapResults } from '../providers/demo.js';
 import { addRun, listRuns } from '../store.js';
+import { notify } from './notify.js';
 
 export function pickMapSource(requested) {
   const s = providerStatus();
@@ -54,6 +55,7 @@ export async function runGridScan(project, { keyword, size = 7, radiusMiles = 3,
     since: prev.createdAt,
   } : null;
 
+  if (delta && delta.solv <= -10) await notify(project.id, 'map_drop', `Map pack coverage for "${keyword}" fell ${Math.abs(delta.solv)} pts`, `Share of Local Voice is now ${metrics.solv}%. Check the Map Rank Grid for which areas you lost.`, 'maps', { email: true });
   // Keep top-3 per point in storage (full 20 only for the latest view) to keep the DB small.
   const data = { config: { keyword, size, radiusMiles, shape, source: src, center: { lat: project.lat, lng: project.lng } }, metrics, delta, insights, leaderboard, points, errors: errors.length };
   return addRun(project.id, 'grid', data, { keyword: keyword.toLowerCase(), source: src });

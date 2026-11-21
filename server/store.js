@@ -8,7 +8,7 @@ import { config } from './config.js';
 const FILE = () => path.join(config.dataDir, 'db.json');
 let db = null;
 
-const EMPTY = { projects: [], runs: [] };
+const EMPTY = { projects: [], runs: [], alerts: [], contacts: [], shares: [], settings: {} };
 
 function load() {
   if (db) return db;
@@ -17,7 +17,7 @@ function load() {
   } catch {
     db = structuredClone(EMPTY);
   }
-  for (const k of Object.keys(EMPTY)) db[k] ??= [];
+  for (const [k, v] of Object.entries(EMPTY)) db[k] ??= structuredClone(v);
   return db;
 }
 
@@ -63,6 +63,9 @@ export function deleteProject(pid) {
   const d = load();
   d.projects = d.projects.filter(p => p.id !== pid);
   d.runs = d.runs.filter(r => r.projectId !== pid);
+  d.alerts = d.alerts.filter(r => r.projectId !== pid);
+  d.contacts = d.contacts.filter(r => r.projectId !== pid);
+  d.shares = d.shares.filter(r => r.projectId !== pid);
   save();
 }
 
@@ -81,3 +84,33 @@ export function latestRun(projectId, type, where = () => true) {
   return listRuns(projectId, type, 1000).find(where) || null;
 }
 export function getRun(rid) { return load().runs.find(r => r.id === rid) || null; }
+
+// ---- Alerts (in-app notification feed; optionally emailed) -------------
+export function addAlert(projectId, kind, title, detail = '', link = '') {
+  const a = { id: id(), projectId, kind, title, detail, link, createdAt: new Date().toISOString(), read: false };
+  load().alerts.unshift(a); load().alerts.splice(500); save(); return a;
+}
+export function listAlerts(projectId) { return load().alerts.filter(a => !projectId || a.projectId === projectId); }
+export function markAlertsRead(projectId) { load().alerts.forEach(a => { if (!projectId || a.projectId === projectId) a.read = true; }); save(); }
+
+// ---- Review-request contacts --------------------------------------------
+export function listContacts(projectId) { return load().contacts.filter(c => c.projectId === projectId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)); }
+export function addContact(projectId, data) {
+  const c = { id: id(), token: crypto.randomBytes(9).toString('base64url'), projectId, status: 'pending', createdAt: new Date().toISOString(), events: [], ...data };
+  load().contacts.push(c); save(); return c;
+}
+export function getContact(cid) { return load().contacts.find(c => c.id === cid || c.token === cid) || null; }
+export function updateContact(cid, patch) { const c = getContact(cid); if (!c) return null; Object.assign(c, patch); save(); return c; }
+export function deleteContact(cid) { const d = load(); d.contacts = d.contacts.filter(c => c.id !== cid); save(); }
+
+// ---- Shareable report links ---------------------------------------------
+export function createShare(projectId) {
+  const s = { token: crypto.randomBytes(12).toString('base64url'), projectId, createdAt: new Date().toISOString() };
+  load().shares.push(s); save(); return s;
+}
+export function getShare(token) { return load().shares.find(s => s.token === token) || null; }
+export function revokeShares(projectId) { const d = load(); d.shares = d.shares.filter(s => s.projectId !== projectId); save(); }
+
+// ---- Global settings (branding, notification email) ---------------------
+export function getSettings() { return load().settings; }
+export function updateSettings(patch) { Object.assign(load().settings, patch); save(); return load().settings; }
