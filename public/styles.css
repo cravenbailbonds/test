@@ -171,3 +171,12 @@ body.public #view { margin: 0 auto; }
 .bars .bar-row { grid-template-columns: minmax(70px, 130px) 1fr 48px; }
 .bars .bar-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bars .bar-row > span:last-child { text-align: right; }
+@media (max-width: 760px) {
+  .g4, .g6 { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .g4 > :not(.stat), .g6 > :not(.stat) { grid-column: span 2; }
+  .stat .value { font-size: 24px; }
+  .card { padding: 14px; }
+  #sidebar.open { box-shadow: 0 0 0 100vmax rgb(0 0 0 / .35); }
+  #topbar h1 { font-size: 18px; }
+  #pageActions button { padding: 7px 10px; }
+}

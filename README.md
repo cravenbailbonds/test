@@ -33,6 +33,16 @@ npm start                # http://localhost:3000
 
 Click **Add Business**, then **Try with a sample business** to explore immediately. Every module works without keys in clearly labelled **DEMO DATA** mode, except the site audit and listings checker, which always run live. Review requests and report emails run in test mode (recorded, not sent) until email/SMS keys are added.
 
+## Put it online (use it from your phone)
+
+1. Merge the pull request into `main` (Render deploys from the default branch).
+2. Open **https://render.com/deploy?repo=https://github.com/cravenbailbonds/test**, sign in with GitHub and allow Render to see the repository.
+3. When asked, set **APP_PASSWORD** (required, it protects your data) and paste any API keys you have. Blank keys keep that module in demo mode.
+4. Click **Deploy**. After a few minutes you get an address like `https://rankpilot-xxxx.onrender.com`.
+5. On your phone, open that address, enter the password (any username), then **Share → Add to Home Screen** (iPhone) or **⋮ → Install app** (Android) to get an app icon.
+
+The free plan is fine for trying it, but it sleeps after 15 minutes idle (the first visit then takes about a minute) and **erases saved data on every restart or redeploy**. For real use, switch the service to the Starter plan, add a 1 GB disk mounted at `/var/data`, and set `DATA_DIR=/var/data`. Scheduled scans and review-request sending need the server awake, which also requires a paid plan.
+
 ## Data providers (all optional)
 
 | Key | Unlocks |

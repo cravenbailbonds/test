@@ -687,7 +687,8 @@ views.settings = async (el, p) => {
 // ---------------------------------------------------------------- boot
 const theme = store.get('theme', null); if (theme) document.documentElement.dataset.theme = theme;
 $('#themeToggle').onclick = () => { const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); const next = cur === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = next; store.set('theme', next); };
-$('#menuBtn').onclick = () => $('#sidebar').classList.toggle('open');
+$('#menuBtn').onclick = e => { e.stopPropagation(); $('#sidebar').classList.toggle('open'); };
+document.querySelector('main').addEventListener('click', () => $('#sidebar').classList.remove('open'));
 $('#projectSelect').onchange = e => { S.pid = e.target.value; store.set('pid', S.pid); router(); };
 window.addEventListener('hashchange', router);
 (async () => {

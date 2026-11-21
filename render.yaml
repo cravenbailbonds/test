@@ -1,0 +1,23 @@
+# One-click deploy to Render: https://render.com/deploy?repo=https://github.com/cravenbailbonds/test
+# You'll be asked for APP_PASSWORD (required - protects your data) and can paste any API keys you have.
+services:
+  - type: web
+    name: rankpilot
+    runtime: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: APP_PASSWORD
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_PLACES_API_KEY
+        sync: false
+      - key: DATAFORSEO_LOGIN
+        sync: false
+      - key: DATAFORSEO_PASSWORD
+        sync: false

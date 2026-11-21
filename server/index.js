@@ -24,7 +24,7 @@ import { reportBundle, newShare, bundleForShare, emailReport } from './modules/r
 import { ENGINES } from './providers/engines.js';
 
 const PUBLIC = path.join(ROOT, 'public');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon' };
+const MIME = { '.webmanifest': 'application/manifest+json', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon' };
 
 const routes = [];
 const route = (method, pattern, handler) => routes.push({ method, re: new RegExp('^' + pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$'), handler });
@@ -32,6 +32,7 @@ const route = (method, pattern, handler) => routes.push({ method, re: new RegExp
 function project(params) { const p = store.getProject(params.pid); if (!p) throw Object.assign(new Error('Project not found'), { status: 404 }); return p; }
 const slim = run => run && ({ ...run, data: run.type === 'grid' ? { ...run.data, points: run.data.points.map(p => ({ ...p, results: p.results.slice(0, 3) })) } : run.data });
 
+route('GET', '/api/health', () => ({ ok: true }));
 route('GET', '/api/status', () => ({ providers: providerStatus(), model: config.anthropicModel, engines: Object.fromEntries(Object.entries(ENGINES).map(([k, e]) => [k, { label: e.label, live: e.available() }])), contentTypes: Object.fromEntries(Object.entries(CONTENT_TYPES).map(([k, v]) => [k, v.label])) }));
 route('GET', '/api/places/search', async (_, q) => {
   if (!providerStatus().places) return { results: [], note: 'Add GOOGLE_PLACES_API_KEY to search Google for your business.' };
@@ -123,7 +124,7 @@ function baseUrl(req) {
 // Optional password protection for the whole app (except customer review links and shared reports).
 function authorized(req, pathname) {
   if (!config.appPassword) return true;
-  if (pathname.startsWith('/r/') || pathname.startsWith('/api/share/') || pathname === '/share.html') return true;
+  if (pathname.startsWith('/r/') || pathname.startsWith('/api/share/') || pathname === '/api/health' || pathname === '/manifest.webmanifest' || pathname.startsWith('/icons/')) return true;
   const h = req.headers.authorization || '';
   const [, b64] = h.split(' ');
   const pass = b64 ? Buffer.from(b64, 'base64').toString().split(':').slice(1).join(':') : '';
